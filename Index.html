@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IPTV Player</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.4.12"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #121212;
+            color: #f1f1f1;
+            font-family: 'Inter', system-ui, sans-serif;
+        }
+        
+        .player-container {
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        .video-player {
+            width: 100%;
+            aspect-ratio: 16/9;
+            background-color: #000;
+        }
+        
+        .status-indicator {
+            height: 10px;
+            width: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        
+        .status-loading {
+            background-color: #fbbf24;
+            animation: pulse 1.5s infinite;
+        }
+        
+        .status-playing {
+            background-color: #10b981;
+        }
+        
+        .status-error {
+            background-color: #ef4444;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 0.6; }
+            50% { opacity: 1; }
+            100% { opacity: 0.6; }
+        }
+        
+        .channel-card {
+            transition: all 0.2s ease;
+        }
+        
+        .channel-card:hover {
+            transform: translateY(-2px);
+        }
+        
+        .debug-info {
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 100px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="min-h-screen flex flex-col">
+        <header class="bg-gray-900 py-4 px-6 shadow-lg">
+            <div class="container mx-auto flex flex-col sm:flex-row justify-between items-center">
+                <h1 class="text-2xl font-bold text-indigo-400 mb-2 sm:mb-0">IPTV Player</h1>
+                <div class="text-sm text-gray-400">Stream your favorite channels</div>
+            </div>
+        </header>
+        
+        <main class="flex-grow container mx-auto px-4 py-8">
+            <div class="max-w-5xl mx-auto">
+                <!-- Video Player -->
+                <div class="player-container bg-gray-800 mb-6">
+                    <video id="videoPlayer" class="video-player" controls playsinline></video>
+                </div>
+                
+                <!-- Controls -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div class="col-span-1 md:col-span-2">
+                        <div class="flex flex-col sm:flex-row gap-3">
+                            <select id="sourceSelect" class="bg-gray-800 text-white rounded-lg px-4 py-2 border border-gray-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none flex-grow">
+                                <option value="">-- Select a Source --</option>
+                                <option value="https://iptv-org.github.io/iptv/countries/bd.m3u">Bangla IPTV Channels</option>
+                                <option value="https://iptv-org.github.io/iptv/index.m3u">Global IPTV Channels</option>
+                                <option value="custom">Load Custom Playlist</option>
+                            </select>
+                            <div class="relative">
+                                <button id="fileInputBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-4 py-2 hidden">
+                                    Choose File
+                                </button>
+                                <input type="file" id="playlistFile" accept=".m3u,.m3u8" class="hidden" />
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-span-1">
+                        <div class="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-2">
+                            <div class="flex items-center">
+                                <span id="statusIndicator" class="status-indicator"></span>
+                                <span id="statusText">Ready</span>
+                            </div>
+                            <button id="refreshBtn" class="text-indigo-400 hover:text-indigo-300 p-1">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Direct URL Input -->
+                <div class="mb-6">
+                    <div class="flex flex-col sm:flex-row gap-3">
+                        <input type="text" id="directUrlInput" placeholder="Or enter direct stream URL (m3u8)" 
+                               class="bg-gray-800 text-white rounded-lg px-4 py-2 border border-gray-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none flex-grow">
+                        <button id="loadDirectUrl" class="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-6 py-2">
+                            Load
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Channel List -->
+                <div class="mb-4">
+                    <h2 class="text-xl font-semibold mb-3 text-indigo-300">Channels</h2>
+                    <div id="channelList" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                        <div class="bg-gray-800 rounded-lg p-4 text-center text-gray-400">
+                            <p>Select a playlist to load channels</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Debug Info -->
+                <div class="mt-6 bg-gray-800 rounded-lg p-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="text-sm font-semibold text-gray-400">Player Status</h3>
+                        <button id="toggleDebug" class="text-xs text-indigo-400 hover:text-indigo-300">Show Details</button>
+                    </div>
+                    <div id="debugInfo" class="debug-info hidden text-gray-400 bg-gray-900 p-2 rounded mt-2"></div>
+                </div>
+            </div>
+        </main>
+        
+        <footer class="bg-gray-900 py-4 px-6">
+            <div class="container mx-auto text-center text-gray-400 text-sm">
+                <p>IPTV Player - Stream your favorite channels using HLS</p>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // DOM Elements
+            const video = document.getElementById('videoPlayer');
+            const sourceSelect = document.getElementById('sourceSelect');
+            const channelList = document.getElementById('channelList');
+            const playlistFile = document.getElementById('playlistFile');
+            const fileInputBtn = document.getElementById('fileInputBtn');
+            const refreshBtn = document.getElementById('refreshBtn');
+            const statusIndicator = document.getElementById('statusIndicator');
+            const statusText = document.getElementById('statusText');
+            const directUrlInput = document.getElementById('directUrlInput');
+            const loadDirectUrl = document.getElementById('loadDirectUrl');
+            const debugInfo = document.getElementById('debugInfo');
+            const toggleDebug = document.getElementById('toggleDebug');
+            
+            // Variables
+            let hls = null;
+            let channels = [];
+            let currentChannel = null;
+            let debugMode = false;
+            
+            // Debug logging
+            function logDebug(message) {
+                const timestamp = new Date().toLocaleTimeString();
+                const logEntry = document.createElement('div');
+                logEntry.textContent = `[${timestamp}] ${message}`;
+                debugInfo.appendChild(logEntry);
+                debugInfo.scrollTop = debugInfo.scrollHeight;
+                console.log(`[IPTV Player] ${message}`);
+            }
+            
+            // Toggle debug info
+            toggleDebug.addEventListener('click', function() {
+                debugMode = !debugMode;
+                debugInfo.classList.toggle('hidden');
+                this.textContent = debugMode ? 'Hide Details' : 'Show Details';
+            });
+            
+            // Update status indicator
+            function updateStatus(status, message) {
+                statusIndicator.className = 'status-indicator';
+                statusIndicator.classList.add('status-' + status);
+                statusText.textContent = message;
+                logDebug(message);
+            }
+            
+            // Check if HLS is supported
+            function checkHlsSupport() {
+                if (Hls.isSupported()) {
+                    logDebug('HLS.js is supported');
+                    return true;
+                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                    logDebug('Native HLS is supported (Safari)');
+                    return true;
+                } else {
+                    updateStatus('error', 'HLS is not supported in your browser');
+                    return false;
+                }
+            }
+            
+            // Initialize HLS player
+            function initPlayer(videoSrc, title) {
+                if (!videoSrc) {
+                    updateStatus('error', 'No video source provided');
+                    return;
+                }
+                
+                updateStatus('loading', `Loading stream: ${title || videoSrc}`);
+                logDebug(`Attempting to play: ${videoSrc}`);
+                
+                // Destroy existing HLS instance if any
+                if (hls) {
+                    logDebug('Destroying previous HLS instance');
+                    hls.destroy();
+                    hls = null;
+                }
+                
+                // Stop any current playback
+                video.pause();
+                video.removeAttribute('src');
+                video.load();
+                
+                currentChannel = {
+                    url: videoSrc,
+                    title: title || 'Unknown Channel'
+                };
+                
+                if (Hls.isSupported()) {
+                    try {
+                        hls = new Hls({
+                            debug: debugMode,
+                            fragLoadingMaxRetry: 5,
+                            manifestLoadingMaxRetry: 5,
+                            levelLoadingMaxRetry: 5
+                        });
+                        
+                        hls.loadSource(videoSrc);
+                        hls.attachMedia(video);
+                        
+                        hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                            logDebug('Manifest parsed, attempting to play');
+                            playVideo();
+                        });
+                        
+                        hls.on(Hls.Events.ERROR, function(event, data) {
+                            logDebug(`HLS Error: ${data.type} - ${data.details}`);
+                            
+                            if (data.fatal) {
+                                switch(data.type) {
+                                    case Hls.ErrorTypes.NETWORK_ERROR:
+                                        updateStatus('error', 'Network error');
+                                        logDebug('Attempting to recover from network error');
+                                        hls.startLoad();
+                                        break;
+                                    case Hls.ErrorTypes.MEDIA_ERROR:
+                                        updateStatus('error', 'Media error');
+                                        logDebug('Attempting to recover from media error');
+                                        hls.recoverMediaError();
+                                        break;
+                                    default:
+                                        updateStatus('error', `Fatal error: ${data.details}`);
+                                        hls.destroy();
+                                        break;
+                                }
+                            }
+                        });
+                    } catch (e) {
+                        updateStatus('error', `HLS initialization error: ${e.message}`);
+                        logDebug(`Exception: ${e.message}`);
+                    }
+                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                    // Native HLS support (Safari)
+                    logDebug('Using native HLS playback');
+                    video.src = videoSrc;
+                    video.addEventListener('loadedmetadata', function() {
+                        playVideo();
+                    });
+                    video.addEventListener('error', function(e) {
+                        updateStatus('error', `Video error: ${video.error ? video.error.message : 'Unknown error'}`);
+                        logDebug(`Native playback error: ${video.error ? video.error.code : 'Unknown'}`);
+                    });
+                }
+            }
+            
+            // Attempt to play video
+            function playVideo() {
+                const playPromise = video.play();
+                
+                if (playPromise !== undefined) {
+                    playPromise.then(() => {
+                        updateStatus('playing', `Playing: ${currentChannel.title}`);
+                        document.title = `${currentChannel.title} - IPTV Player`;
+                    }).catch(err => {
+                        logDebug(`Play error: ${err.message}`);
+                        updateStatus('error', 'Autoplay prevented - Click play button');
+                        
+                        // Create a play button overlay if autoplay is blocked
+                        const playerContainer = video.parentElement;
+                        let playOverlay = document.getElementById('playOverlay');
+                        
+                        if (!playOverlay) {
+                            playOverlay = document.createElement('div');
+                            playOverlay.id = 'playOverlay';
+                            playOverlay.className = 'absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 cursor-pointer';
+                            playOverlay.innerHTML = `
+                                <div class="bg-indigo-600 rounded-full p-4">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                </div>
+                            `;
+                            
+                            playOverlay.addEventListener('click', function() {
+                                video.play()
+                                    .then(() => {
+                                        playOverlay.remove();
+                                        updateStatus('playing', `Playing: ${currentChannel.title}`);
+                                    })
+                                    .catch(err => {
+                                        updateStatus('error', `Cannot play: ${err.message}`);
+                                    });
+                            });
+                            
+                            playerContainer.style.position = 'relative';
+                            playerContainer.appendChild(playOverlay);
+                        }
+                    });
+                }
+            }
+            
+            // Parse M3U playlist from URL
+            async function parseM3U(url) {
+                updateStatus('loading', 'Loading playlist...');
+                logDebug(`Fetching playlist: ${url}`);
+                
+                try {
+                    const response = await fetch(url);
+                    if (!response.ok) {
+                        throw new Error(`Failed to load playlist (${response.status})`);
+                    }
+                    const data = await response.text();
+                    logDebug(`Playlist loaded, size: ${data.length} bytes`);
+                    return parseM3UContent(data);
+                } catch (error) {
+                    logDebug(`Error loading playlist: ${error.message}`);
+                    updateStatus('error', `Failed to load playlist: ${error.message}`);
+                    return [];
+                }
+            }
+            
+            // Parse M3U content
+            function parseM3UContent(content) {
+                logDebug('Parsing M3U content');
+                const lines = content.split('\n');
+                const channels = [];
+                let currentChannel = null;
+                
+                if (!content.trim().startsWith('#EXTM3U')) {
+                    logDebug('Warning: Content does not start with #EXTM3U');
+                }
+                
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    
+                    if (line.startsWith('#EXTINF:')) {
+                        // Extract channel info
+                        const infoMatch = line.match(/#EXTINF:[-\d.]+(.*)/);
+                        if (infoMatch) {
+                            const info = infoMatch[1].trim();
+                            const titleMatch = info.match(/,(.+)$/);
+                            const title = titleMatch ? titleMatch[1].trim() : 'Unknown Channel';
+                            
+                            // Extract logo if available
+                            const logoMatch = info.match(/tvg-logo="([^"]+)"/);
+                            const logo = logoMatch ? logoMatch[1] : null;
+                            
+                            // Extract group if available
+                            const groupMatch = info.match(/group-title="([^"]+)"/);
+                            const group = groupMatch ? groupMatch[1] : null;
+                            
+                            currentChannel = {
+                                title: title,
+                                logo: logo,
+                                group: group
+                            };
+                        }
+                    } else if (line && !line.startsWith('#') && currentChannel) {
+                        // This is the URL
+                        currentChannel.url = line;
+                        channels.push(currentChannel);
+                        currentChannel = null;
+                    }
+                }
+                
+                logDebug(`Parsed ${channels.length} channels`);
+                return channels;
+            }
+            
+            // Display channels in the UI
+            function displayChannels(channels) {
+                if (channels.length === 0) {
+        
